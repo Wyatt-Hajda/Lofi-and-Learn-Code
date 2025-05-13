@@ -1,0 +1,95 @@
+# region imports
+from AlgorithmImports import *
+import numpy as np
+# endregion
+
+class EnhancedTradingStrategy(QCAlgorithm):
+
+    def initialize(self):
+        self.set_start_date(2020, 1, 1)
+        self.set_cash(1000)
+
+        self.symbols = ["SPY", "BND", "AAPL", "NVDA"]
+        self.equities = [self.add_equity(symbol, Resolution.MINUTE) for symbol in self.symbols]
+
+        # Define indicators for dynamic entry
+        self.sma_short = {}
+        self.sma_long = {}
+        self.rsi_values = {}  # Avoid function call confusion
+
+        for symbol in self.symbols:
+            self.sma_short[symbol] = self.sma(symbol, 50, Resolution.Daily)
+            self.sma_long[symbol] = self.sma(symbol, 200, Resolution.Daily)
+            self.rsi_values[symbol] = self.rsi(symbol, 14, Resolution.Daily)  # Fixed naming issue
+
+        self.stop_loss_percent = 0.05  # 5% stop-loss
+        self.take_profit_percent = 0.15  # 15% take-profit
+
+        self.rebalance_interval = timedelta(days=30)  # Rebalance monthly
+        self.last_rebalance = self.time
+
+        self.machine_learning_predictions = {}  # Placeholder for future ML enhancements
+        self.option_hedging = {}
+
+    def on_data(self, data: Slice):
+        # Dynamic entry based on momentum
+        for symbol in self.symbols:
+            if data.bars.contains_key(symbol):
+                price = data.bars[symbol].close
+                if (self.sma_short[symbol].current.value > self.sma_long[symbol].current.value and 
+                    self.rsi_values[symbol].current.value < 70):
+                    allocation = self.calculate_dynamic_allocation(symbol)
+                    self.set_holdings(symbol, allocation)
+
+        # Stop-loss and take-profit
+        for symbol in self.symbols:
+            if symbol in self.portfolio:
+                position = self.portfolio[symbol]
+                if position.quantity > 0:
+                    entry_price = position.average_price
+                    if position.unrealized_profit_percent <= -self.stop_loss_percent:
+                        self.liquidate(symbol)  # Stop-loss trigger
+                    elif position.unrealized_profit_percent >= self.take_profit_percent:
+                        self.liquidate(symbol)  # Take-profit trigger
+
+        # Rebalancing
+        if self.time - self.last_rebalance >= self.rebalance_interval:
+            self.rebalance_portfolio()
+            self.last_rebalance = self.time
+
+        # Placeholder for ML-based decision-making
+        self.apply_machine_learning_predictions()
+
+        # Hedge using options if needed
+        self.hedge_with_options()
+
+    def calculate_dynamic_allocation(self, symbol):
+        """ Adjusts allocation based on volatility """
+        history_data = self.history(symbol, 30, Resolution.Daily)
+        
+        prices = [bar.close for bar in history_data]  # Extract close prices
+        if prices:
+            hist_vol = np.std(prices)
+            allocation = min(0.4, max(0.1, 0.25 / (hist_vol + 1e-5)))  # Normalize allocation
+            return allocation
+
+        return 0.25  # Default allocation if no data is available
+
+    def rebalance_portfolio(self):
+        """ Rebalances portfolio based on performance """
+        performances = {symbol: self.portfolio[symbol].unrealized_profit_percent for symbol in self.symbols}
+        best_performers = sorted(performances, key=performances.get, reverse=True)[:2]  # Top 2 assets
+        for symbol in self.symbols:
+            allocation = 0.35 if symbol in best_performers else 0.15
+            self.set_holdings(symbol, allocation)
+
+    def apply_machine_learning_predictions(self):
+        """ Placeholder for ML-based predictive trading """
+        pass  # Future enhancement: Implement LASSO/Ridge regression or reinforcement learning
+
+    def hedge_with_options(self):
+        """ Implements basic hedging strategies using options """
+        for symbol in self.symbols:
+            if self.portfolio[symbol].quantity > 0:
+                self.option_hedging[symbol] = self.add_option(symbol, Resolution.Daily)
+                self.option_hedging[symbol].set_filter(-5, -1, 30, 60)  # Protective put strategy
