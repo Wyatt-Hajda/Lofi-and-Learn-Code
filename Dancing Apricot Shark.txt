@@ -1,0 +1,26 @@
+from AlgorithmImports import *
+
+class MovingAverageStrategy(QCAlgorithm):
+    def Initialize(self):
+        self.SetStartDate(2020, 1, 1)
+        self.SetCash(1000)
+        self.symbol = self.AddEquity("NVDA", Resolution.Daily).Symbol
+
+        # Define configurable parameters for moving averages
+        self.short_window = self.GetParameter("short_window") or 10
+        self.long_window = self.GetParameter("long_window") or 30
+
+        self.short_ma = self.SMA(self.symbol, int(self.short_window), Resolution.Daily)
+        self.long_ma = self.SMA(self.symbol, int(self.long_window), Resolution.Daily)
+
+    def OnData(self, data):
+        if not self.short_ma.IsReady or not self.long_ma.IsReady:
+            return  # Wait until indicators are ready
+
+        # Buy when short MA crosses above long MA
+        if self.short_ma.Current.Value > self.long_ma.Current.Value and not self.Portfolio.Invested:
+            self.SetHoldings(self.symbol, 1)
+
+        # Sell when short MA crosses below long MA
+        elif self.short_ma.Current.Value < self.long_ma.Current.Value and self.Portfolio.Invested:
+            self.Liquidate(self.symbol)
