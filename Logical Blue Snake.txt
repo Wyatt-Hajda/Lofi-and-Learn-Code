@@ -1,0 +1,35 @@
+from AlgorithmImports import *
+
+class CryptoTradingAlgorithm(QCAlgorithm):
+
+    def initialize(self):
+        self.set_start_date(2020, 1, 1)
+        self.set_cash(100000)
+        
+        # Define trading pairs
+        self.symbols = ["BTCUSD", "ETHUSD"]
+        self.rsi_period = 14
+        self._rsi_dic = {}
+
+        # Add cryptocurrency assets and store RSI indicators
+        for symbol in self.symbols:
+            self.add_security(SecurityType.CRYPTO, symbol, Resolution.DAILY)
+            self._rsi_dic[symbol] = self.rsi(symbol, self.rsi_period, MovingAverageType.SIMPLE, Resolution.DAILY)
+
+    def on_data(self, data):
+        for symbol in self.symbols:
+            if symbol not in data or not data[symbol].close:
+                continue
+            
+            rsi = self._rsi_dic[symbol].current.value
+            price = data[symbol].close
+            
+            # Buy if RSI is below 30 (oversold)
+            if rsi < 30 and self.portfolio[symbol].quantity == 0:
+                self.set_holdings(symbol, 0.5)
+                self.debug(f"Buying {symbol} at price: {price}, RSI: {rsi}")
+
+            # Sell if RSI is above 70 (overbought)
+            elif rsi > 70 and self.portfolio[symbol].quantity > 0:
+                self.liquidate(symbol)
+                self.debug(f"Selling {symbol} at price: {price}, RSI: {rsi}")
