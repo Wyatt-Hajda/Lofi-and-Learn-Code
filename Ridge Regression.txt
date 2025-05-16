@@ -1,0 +1,30 @@
+from sklearn.linear_model import Ridge
+from QuantConnect.Algorithm import QCAlgorithm
+from QuantConnect import Resolution
+
+class SimpleRidgeRegression(QCAlgorithm):
+    def Initialize(self):
+        self.SetStartDate(2023, 1, 1)
+        self.SetEndDate(2025, 1, 1)
+        self.SetCash(1000)
+        self.symbol = self.AddEquity("AAPL", Resolution.Daily).Symbol
+
+        self.lookback = 20  # Training period
+        self.model = Ridge(alpha=1.0)
+
+    def OnData(self, data):
+        history = self.History(self.symbol, self.lookback, Resolution.Daily)
+        if history.empty:
+            return
+        
+        prices = history['close'].values
+        X_train = [[i] for i in range(len(prices))]
+        y_train = prices
+
+        self.model.fit(X_train, y_train)
+        predicted_price = self.model.predict([[self.lookback]])[0]
+
+        if predicted_price > prices[-1]:  
+            self.SetHoldings(self.symbol, 0.5)  # Buy
+        else:
+            self.Liquidate(self.symbol)  # Sell
