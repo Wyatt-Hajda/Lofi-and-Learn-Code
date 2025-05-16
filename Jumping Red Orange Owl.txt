@@ -1,0 +1,39 @@
+from AlgorithmImports import *
+import numpy as np
+import statsmodels.api as sm
+
+class BitcoinTradingAlgorithm(QCAlgorithm):
+    def Initialize(self):
+        self.SetStartDate(2020, 1, 1)  # Set the start date
+        self.SetEndDate(2025, 1, 1)  # Set the end date
+        self.SetCash(1000)  # Set initial capital
+        self.crypto = self.AddCrypto("BTCUSD", Resolution.Daily)  # Add Bitcoin trading pair
+        self.lookback = 30  # Number of days for OLS regression
+
+    def OnData(self, data):
+        if not data.ContainsKey("BTCUSD"):
+            return
+
+        history = list(self.History("BTCUSD", self.lookback, Resolution.Daily))  # Convert to list
+        if not history:  # Proper empty check
+            return
+
+        # Extract closing prices
+        prices = [bar.Close for bar in history]
+        if len(prices) < self.lookback:
+            return
+
+        # Prepare time variable
+        X = np.arange(len(prices)).reshape(-1, 1)
+        X = sm.add_constant(X)  # Add intercept for OLS regression
+        y = prices
+
+        # Fit OLS model
+        model = sm.OLS(y, X).fit()
+        slope = model.params[1]  # Extract the trend slope
+
+        # Trading logic based on trend
+        if slope > 0 and not self.Portfolio.Invested:
+            self.SetHoldings("BTCUSD", 1)  # Invest in Bitcoin if trend is positive
+        elif slope < 0 and self.Portfolio.Invested:
+            self.Liquidate("BTCUSD")  # Exit position if trend is negative
