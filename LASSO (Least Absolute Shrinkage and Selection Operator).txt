@@ -1,0 +1,47 @@
+from AlgorithmImports import *
+from sklearn.linear_model import Lasso
+import numpy as np
+
+class LassoTradingAlgorithm(QCAlgorithm):
+    def Initialize(self):
+        self.SetStartDate(2020, 1, 1)
+        self.SetEndDate(2025, 1, 1)
+        self.SetCash(1000)
+        
+        self.symbol = self.AddEquity("SPY", Resolution.Daily).Symbol
+        self.lookback = 30  # Number of days for feature extraction
+        self.model = Lasso(alpha=0.1)  # Regularization parameter
+        
+        self.Schedule.On(self.DateRules.EveryDay(self.symbol), self.TimeRules.AfterMarketOpen(self.symbol, 10), self.TrainModel)
+
+    def TrainModel(self):
+        history = self.History(self.symbol, self.lookback, Resolution.Daily)
+        if history.empty: return
+        
+        prices = history['close'].values
+        returns = np.diff(prices) / prices[:-1]
+        
+        # Create lag features
+        X = np.array([returns[i:i+10] for i in range(len(returns)-10)])
+        y = returns[10:]
+        
+        if len(X) < 2: return
+        
+        self.model.fit(X, y)
+
+    def OnData(self, data):
+        if not data.Bars.ContainsKey(self.symbol): return
+        
+        history = self.History(self.symbol, self.lookback, Resolution.Daily)
+        if history.empty: return
+        
+        prices = history['close'].values
+        returns = np.diff(prices) / prices[:-1]
+        features = np.array([returns[-10:]])  # Latest feature set
+        
+        prediction = self.model.predict(features)[0]
+        
+        if prediction > 0:
+            self.SetHoldings(self.symbol, 1)  # Bullish signal
+        elif prediction < 0:
+            self.Liquidate(self.symbol)  # Bearish signal
