@@ -1,0 +1,32 @@
+from AlgorithmImports import *
+from sklearn.ensemble import RandomForestClassifier
+import numpy as np
+
+class CryptoMultiAssetTrading(QCAlgorithm):
+
+    def Initialize(self):
+        self.SetStartDate(2023, 1, 1)
+        self.SetCash(100000)
+        
+        # Define cryptocurrency assets
+        self.symbols = [self.AddCrypto("BTCUSD", Resolution.Daily).Symbol,
+                        self.AddCrypto("ETHUSD", Resolution.Daily).Symbol]
+        
+        self.lookback = 10
+        self.rf_model = RandomForestClassifier(n_estimators=10)
+        self.data = {symbol: [] for symbol in self.symbols}
+        
+    def OnData(self, data):
+        for symbol in self.symbols:
+            if symbol in data and data[symbol]:
+                self.data[symbol].append(data[symbol].Close)
+                
+                if len(self.data[symbol]) >= self.lookback:
+                    features = np.array(self.data[symbol][-self.lookback:]).reshape(1, -1)
+                    prediction = self.rf_model.fit(features, [1]).predict(features)  # Dummy fit for simplicity
+                    
+                    # Trading logic
+                    if prediction == 1:
+                        self.SetHoldings(symbol, 0.5)  # Allocate 50% of capital
+                    else:
+                        self.Liquidate(symbol)
