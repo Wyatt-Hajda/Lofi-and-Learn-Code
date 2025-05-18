@@ -1,0 +1,97 @@
+from AlgorithmImports import *
+from sklearn.tree import DecisionTreeClassifier
+import numpy as np
+
+class CryptoTradingCART(QCAlgorithm):
+    def Initialize(self):
+        # Set algorithm parameters
+        self.SetStartDate(2022, 1, 1)
+        self.SetEndDate(2025, 5, 17)
+        self.SetCash(100000)
+
+        # Define trading assets
+        self.symbols = [self.AddCrypto("BTCUSD", Resolution.Hour).Symbol,
+                        self.AddCrypto("ETHUSD", Resolution.Hour).Symbol,
+                        self.AddCrypto("SOLUSD", Resolution.Hour).Symbol]
+        
+        # Define indicators
+        self.short_window = 50
+        self.long_window = 200
+        
+        self.indicators = {}
+        for symbol in self.symbols:
+            self.indicators[symbol] = {
+                "sma_short": self.SMA(symbol, self.short_window, Resolution.Hour),
+                "sma_long": self.SMA(symbol, self.long_window, Resolution.Hour),
+                "rsi": self.RSI(symbol, 14, Resolution.Hour),
+                "roc": self.ROCP(symbol, 10, Resolution.Hour)
+            }
+
+        # Set warm-up period
+        self.SetWarmUp(max(self.long_window, 14))
+
+        # Initialize CART classifier with optimized hyperparameters
+        self.model = DecisionTreeClassifier(max_depth=5, min_samples_split=10)
+        self.features = {symbol: [] for symbol in self.symbols}
+        self.labels = {symbol: [] for symbol in self.symbols}
+
+        # Stop-loss and take-profit parameters
+        self.stop_loss_pct = 0.02  # 2% stop-loss
+        self.take_profit_pct = 0.05  # 5% take-profit
+
+    def OnData(self, data):
+        if self.IsWarmingUp:
+            return
+
+        for symbol in self.symbols:
+            if not data.ContainsKey(symbol):
+                continue
+            
+            indicators = self.indicators[symbol]
+            if not all(ind.IsReady for ind in indicators.values()):
+                continue
+            
+            # Extract indicator values
+            sma_short_value = indicators["sma_short"].Current.Value
+            sma_long_value = indicators["sma_long"].Current.Value
+            rsi_value = indicators["rsi"].Current.Value
+            roc_value = indicators["roc"].Current.Value
+
+            # Compute volatility for dynamic position sizing
+            history = self.History(symbol, 50, Resolution.Hour)
+            volatility = history['close'].std() if not history.empty else 1
+            position_size = min(1, max(0.1, 1 / (volatility * 100)))  # Scale position based on volatility
+            
+            # Create feature set
+            feature = [sma_short_value, sma_long_value, rsi_value, roc_value]
+
+            # Maintain rolling dataset
+            if len(self.features[symbol]) >= 200:
+                self.features[symbol].pop(0)
+                self.labels[symbol].pop(0)
+
+            # Label based on SMA crossover logic
+            label = 1 if sma_short_value > sma_long_value else 0  # 1 for buy, 0 for sell
+            self.features[symbol].append(feature)
+            self.labels[symbol].append(label)
+
+            # Train CART model and predict
+            if len(self.features[symbol]) >= 50:
+                self.model.fit(self.features[symbol], self.labels[symbol])
+                prediction = self.model.predict([feature])[0]
+
+                # Execute trading decisions
+                if prediction == 1 and not self.Portfolio[symbol].Invested:
+                    self.SetHoldings(symbol, position_size)
+                elif prediction == 0 and self.Portfolio[symbol].Invested:
+                    self.Liquidate(symbol)
+
+                # Risk management: Stop-loss & take-profit
+                if self.Portfolio[symbol].Invested:
+                    entry_price = self.Portfolio[symbol].AveragePrice
+                    current_price = self.Securities[symbol].Price
+
+                    if current_price <= entry_price * (1 - self.stop_loss_pct):
+                        self.Liquidate(symbol)  # Stop-loss triggered
+                    elif current_price >= entry_price * (1 + self.take_profit_pct):
+                        self.Liquidate(symbol)  # Take-profit triggered
