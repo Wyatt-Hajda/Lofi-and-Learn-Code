@@ -1,0 +1,66 @@
+from AlgorithmImports import *
+from sklearn.tree import DecisionTreeClassifier
+import numpy as np
+
+class CryptoTradingCART(QCAlgorithm):
+    def Initialize(self):
+        # Set algorithm parameters
+        self.SetStartDate(2022, 1, 1)
+        self.SetEndDate(2025, 5, 17)
+        self.SetCash(100000)
+
+        # Define trading asset
+        self.symbol = self.AddCrypto("BTCUSD", Resolution.Hour).Symbol
+
+        # Define indicators
+        self.short_window = 50
+        self.long_window = 200
+        self.sma_short = self.SMA(self.symbol, self.short_window, Resolution.Hour)
+        self.sma_long = self.SMA(self.symbol, self.long_window, Resolution.Hour)
+        self.rsi = self.RSI(self.symbol, 14, Resolution.Hour)
+
+        # Set warm-up period
+        self.SetWarmUp(max(self.long_window, 14))
+
+        # Initialize CART classifier
+        self.model = DecisionTreeClassifier()
+        self.features = []
+        self.labels = []
+
+    def OnData(self, data):
+        if self.IsWarmingUp or not data.ContainsKey(self.symbol):
+            return
+        
+        # Check if indicators have enough data
+        if not self.sma_short.IsReady or not self.sma_long.IsReady or not self.rsi.IsReady:
+            return
+
+        # Extract indicator values
+        sma_short_value = self.sma_short.Current.Value
+        sma_long_value = self.sma_long.Current.Value
+        rsi_value = self.rsi.Current.Value
+
+        # Create feature set
+        feature = [sma_short_value, sma_long_value, rsi_value]
+
+        # Maintain a rolling dataset
+        if len(self.features) >= 200:
+            self.features.pop(0)
+            self.labels.pop(0)
+
+        # Label based on SMA crossover logic
+        label = 1 if sma_short_value > sma_long_value else 0  # 1 for buy, 0 for sell
+
+        self.features.append(feature)
+        self.labels.append(label)
+
+        # Train the CART model once we have sufficient data
+        if len(self.features) >= 50:
+            self.model.fit(self.features, self.labels)
+            prediction = self.model.predict([feature])[0]
+
+            # Execute trading decisions based on CART predictions
+            if prediction == 1 and not self.Portfolio[self.symbol].Invested:
+                self.SetHoldings(self.symbol, 1)
+            elif prediction == 0 and self.Portfolio[self.symbol].Invested:
+                self.Liquidate(self.symbol)
