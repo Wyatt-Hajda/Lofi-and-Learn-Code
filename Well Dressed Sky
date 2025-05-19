@@ -1,0 +1,90 @@
+from AlgorithmImports import *
+import numpy as np
+from datetime import datetime, timedelta
+
+class ImprovedAlgebraicTradingAlgorithm(QCAlgorithm):
+    def Initialize(self):
+        self.SetStartDate(2020, 1, 1)
+        self.SetEndDate(2025, 1, 1)
+        self.SetCash(100000)
+
+        # Screening parameters
+        self.screening_interval = timedelta(days=7)
+        self.lookback_window = 90
+        self.min_avg_volume_usd = 1_000_000
+        self.num_assets_to_trade = 5
+
+        # Indicators
+        self.sma_period = 20
+        self.ema_period = 10
+        self.stop_loss_pct = 0.05
+
+        # Containers
+        self.symbols = []
+        self.sma = {}
+        self.ema = {}
+
+        # Initial asset selection
+        default_tickers = ["SPY", "EURUSD", "BTCUSD"]
+        default_symbols = [Symbol.Create(t, self.GetSecurityType(t), Market.USA) for t in default_tickers]
+        self.InitializeAssets(default_symbols)
+
+    def InitializeAssets(self, selected_assets):
+        self.symbols.clear()
+        self.sma.clear()
+        self.ema.clear()
+
+        for asset in selected_assets:
+            ticker = asset.Value
+            stype = self.GetSecurityType(ticker)
+            if stype == SecurityType.Equity:
+                sym = self.AddEquity(ticker, Resolution.Daily).Symbol
+            elif stype == SecurityType.Forex:
+                sym = self.AddForex(ticker, Resolution.Daily).Symbol
+            else:
+                sym = self.AddCrypto(ticker, Resolution.Daily).Symbol
+
+            self.symbols.append(sym)
+            self.sma[sym] = self.SMA(sym, self.sma_period, Resolution.Daily)
+            self.ema[sym] = self.EMA(sym, self.ema_period, Resolution.Daily)
+
+    def OnData(self, data):
+        if not self.symbols:
+            return
+
+        for sym in self.symbols:
+            if not data.ContainsKey(sym):
+                continue  # Skip if no data available
+
+            if not (self.sma[sym].IsReady and self.ema[sym].IsReady):
+                continue
+
+            ema_v = self.ema[sym].Current.Value
+            sma_v = self.sma[sym].Current.Value
+
+            # Volatility scaling with safe retrieval of 'Close' prices
+            h = self.History(sym, 20, Resolution.Daily)
+            if not h.empty and 'Close' in h.columns:
+                r = h['Close'].pct_change().dropna()
+                vol = np.std(r) if not r.empty else 1  # Avoid division by zero
+                w = 0.3 / (vol * np.sqrt(252)) if vol > 0 else 0.3
+            else:
+                w = 0.3  # Default weight
+
+            # Trading logic
+            if ema_v > sma_v:
+                self.SetHoldings(sym, w)
+            else:
+                if self.Portfolio[sym].Invested:
+                    self.Liquidate(sym)
+
+            # Stop-loss check
+            if self.Portfolio[sym].Invested and self.Portfolio[sym].UnrealizedProfitPercent < -self.stop_loss_pct:
+                self.Liquidate(sym)
+
+    def GetSecurityType(self, ticker):
+        return {
+            "SPY": SecurityType.Equity,
+            "EURUSD": SecurityType.Forex,
+            "BTCUSD": SecurityType.Crypto
+        }.get(ticker, SecurityType.Equity)
