@@ -1,0 +1,90 @@
+from AlgorithmImports import *
+import numpy as np
+
+class AlgebraicTradingAlgorithm(QCAlgorithm):
+    def Initialize(self):
+        # Backtest period and initial capital
+        self.SetStartDate(2020, 1, 1)
+        self.SetEndDate(2025, 1, 1)
+        self.SetCash(100000)
+
+        # Assets and parameters
+        self.assets = ["SPY", "EURUSD", "BTCUSD"]
+        self.sma_period = 20
+        self.ema_period = 10
+        self.stop_loss_pct = 0.05
+        self.weights = np.array([0.3, 0.4, 0.3])  # target portfolio weights
+
+        # Abstract algebra: define the additive cyclic group Z_n for index operations
+        self.group_order = len(self.weights)  # n for Z_n
+        self.group_add = lambda a, b: (a + b) % self.group_order
+
+        # Containers for symbols and indicators
+        self.symbols = []
+        self.sma = {}
+        self.ema = {}
+
+        # Add and initialize each asset
+        for asset in self.assets:
+            stype = self.GetSecurityType(asset)
+            symbol = None
+            if stype == SecurityType.Equity:
+                symbol = self.AddEquity(asset, Resolution.Daily).Symbol
+            elif stype == SecurityType.Forex:
+                symbol = self.AddForex(asset, Resolution.Daily).Symbol
+            elif stype == SecurityType.Crypto:
+                symbol = self.AddCrypto(asset, Resolution.Daily).Symbol
+
+            if symbol:
+                self.symbols.append(symbol)
+                self.sma[symbol] = self.SMA(symbol, self.sma_period, Resolution.Daily)
+                self.ema[symbol] = self.EMA(symbol, self.ema_period, Resolution.Daily)
+                self.WarmUpIndicator(symbol, self.sma[symbol], Resolution.Daily)
+                self.WarmUpIndicator(symbol, self.ema[symbol], Resolution.Daily)
+
+    def OnData(self, data):
+        if self.IsWarmingUp:
+            return
+
+        for i, symbol in enumerate(self.symbols):
+            # Skip if no data
+            if not data.ContainsKey(symbol):
+                continue
+
+            # Skip if indicators not ready
+            if not (self.sma[symbol].IsReady and self.ema[symbol].IsReady):
+                continue
+
+            # Retrieve values and log
+            ema_value = self.ema[symbol].Current.Value
+            sma_value = self.sma[symbol].Current.Value
+            self.Debug(f"{symbol.Value} EMA={ema_value:.2f} | SMA={sma_value:.2f}")
+
+            # Use abstract algebra: compute index in additive group Z_n
+            idx = self.group_add(i, 0)
+            weight = float(self.weights[idx])
+
+            # Trading logic
+            if ema_value > sma_value:
+                self.SetHoldings(symbol, weight)
+            else:
+                if self.Portfolio[symbol].Invested:
+                    self.Debug(f"Liquidating {symbol.Value}")
+                    self.Liquidate(symbol)
+
+            # Stop-loss enforcement
+            holding = self.Portfolio[symbol]
+            if holding.Invested and holding.UnrealizedProfitPercent < -self.stop_loss_pct:
+                self.Debug(f"Stop-loss triggered for {symbol.Value}")
+                self.Liquidate(symbol)
+
+    def OnOrderEvent(self, orderEvent):
+        self.Debug(f"OrderEvent: {orderEvent}")
+
+    def GetSecurityType(self, ticker: str) -> SecurityType:
+        mapping = {
+            "SPY": SecurityType.Equity,
+            "EURUSD": SecurityType.Forex,
+            "BTCUSD": SecurityType.Crypto
+        }
+        return mapping.get(ticker, None)
