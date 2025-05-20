@@ -1,0 +1,45 @@
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv1D, Flatten, Dense
+from AlgorithmImports import *
+
+class CNNSPTradingAlgorithm(QCAlgorithm):
+
+    def Initialize(self):
+        self.SetStartDate(2022, 1, 1)
+        self.SetEndDate(2025, 5, 19)
+        self.SetCash(100000)
+        self.AddEquity("SPY", Resolution.Daily)
+
+        # Initialize CNN model
+        self.model = self.create_cnn_model()
+        self.train_data = []
+
+    def create_cnn_model(self):
+        model = Sequential([
+            Conv1D(filters=16, kernel_size=3, activation='relu', input_shape=(10, 1)),
+            Flatten(),
+            Dense(16, activation='relu'),
+            Dense(1, activation='sigmoid')  # Output probability for buy/sell
+        ])
+        model.compile(optimizer='adam', loss='binary_crossentropy')
+        return model
+
+    def OnData(self, data):
+        if not data.ContainsKey("SPY") or data["SPY"] is None:
+            return  # Ensure SPY data exists before proceeding
+
+        price = data["SPY"].Close
+        self.train_data.append(price)
+
+        if len(self.train_data) >= 10:
+            X = np.array(self.train_data[-10:]).reshape(1, 10, 1)
+            prediction = self.model.predict(X)[0][0]
+
+            if prediction > 0.5:
+                self.SetHoldings("SPY", 1)
+            else:
+                self.Liquidate()
+
+            self.train_data.pop(0)  # Maintain window size for efficiency
