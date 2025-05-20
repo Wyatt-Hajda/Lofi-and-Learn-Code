@@ -1,0 +1,31 @@
+from AlgorithmImports import *
+
+class SimpleTradeAlgorithm(QCAlgorithm):
+    def Initialize(self):
+        self.SetStartDate(2020, 1, 1)
+        self.SetEndDate(2025, 1, 1)
+        self.SetCash(100000)
+        self.symbol = self.AddEquity("NVDA", Resolution.Daily).Symbol
+
+        # Correctly initialize RollingWindow
+        self.window = RollingWindow[float](10)
+
+        # Retrieve historical data
+        self.history = self.History(self.symbol, 10, Resolution.Daily)
+        for row in self.history.itertuples():
+            self.window.Add(float(row.close))  # Ensure correct data type
+
+    def OnData(self, data):
+        if not data.ContainsKey(self.symbol) or not data[self.symbol]:
+            return
+
+        price = data[self.symbol].Close
+        self.window.Add(price)
+
+        if self.window.IsReady:
+            avg = sum(self.window) / self.window.Count  # Corrected moving average calculation
+            if price > avg and not self.Portfolio[self.symbol].Invested:
+                self.SetHoldings(self.symbol, 1)
+            elif price < avg and self.Portfolio[self.symbol].Invested:
+                self.Liquidate(self.symbol)
+                
